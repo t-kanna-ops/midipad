@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>コード進行＆ボイスリーディング・チェッカー (和声学完全対応版)</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f7f9fc;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 { color: #333; font-size: 24px; margin-bottom: 5px; }
+        .desc { color: #666; font-size: 14px; margin-bottom: 10px; text-align: center;}
+        
+        #score-display {
+            font-size: 20px;
+            font-weight: bold;
+            color: #004085;
+            background-color: #cce5ff;
+            padding: 10px 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #b8daff;
+        }
+
+        .controls {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            background: #fff;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        select, button {
+            padding: 8px 16px; font-size: 16px;
+            border: 1px solid #ccc; border-radius: 4px; cursor: pointer;
+        }
+        button { background-color: #007bff; color: white; border: none; transition: background 0.2s; }
+        button:hover { background-color: #0056b3; }
+        
+        #btnPrint { background-color: #6c757d; }
+        #btnPrint:hover { background-color: #5a6268; }
+
+        .workspace {
+            background: #fff; padding: 20px;
+            border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        svg { display: block; user-select: none; touch-action: none; }
+        .buttons-container { display: flex; width: 960px; justify-content: space-around; margin-top: 10px; }
+        .measure-btn { font-size: 13px; padding: 6px 10px; background-color: #28a745; }
+        .measure-btn:hover { background-color: #218838; }
+        
+        /* 採点内訳パネル */
+        #breakdown-container {
+            width: 960px;
+            background: #fff;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            max-height: 250px;
+            overflow-y: auto;
+        }
+        #breakdown-container h2 { font-size: 16px; margin-top: 0; color: #333; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        .log-list { list-style: none; padding: 0; margin: 0; font-size: 14px; }
+        .log-item { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #eee; }
+        .log-plus { color: #28a745; font-weight: bold; }
+        .log-minus { color: #dc3545; font-weight: bold; }
+
+        /* SVG Elements */
+        .staff-line { stroke: #333; stroke-width: 1; pointer-events: none; }
+        .measure-line { stroke: #333; stroke-width: 2; pointer-events: none; }
+        .conn-line { stroke: #aaa; stroke-width: 2; stroke-dasharray: 4; pointer-events: none; }
+        .note { fill: #222; cursor: grab; }
+        .note.note-up { fill: #dc3545; }
+        .note.note-down { fill: #007bff; }
+        .note:active { cursor: grabbing; fill: #6c757d; }
+        .accidental { font-size: 18px; font-weight: bold; fill: #222; pointer-events: none; user-select: none; }
+        .chord-name { font-size: 18px; font-weight: bold; fill: #004085; text-anchor: middle; pointer-events: none; }
+        .ledger-line { stroke: #222; stroke-width: 2; pointer-events: none; }
+        .eval-text { font-size: 14px; font-weight: bold; dominant-baseline: middle; text-anchor: middle; pointer-events: none; }
+        .eval-bg { fill: rgba(255, 255, 255, 0.9); pointer-events: none; }
+        .mark-perfect { fill: #28a745; }
+        .mark-good { fill: #007bff; }
+        .mark-bad { fill: #dc3545; }
+
+        @media print {
+            body { background-color: #fff; padding: 0; }
+            .controls, .desc, .buttons-container, #breakdown-container { display: none !important; }
+            .workspace { box-shadow: none; padding: 0; margin-bottom: 0; }
+            #score-display { border: none; background-color: transparent; padding: 0; color: #000; margin-bottom: 10px; }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>コード進行＆ボイスリーディング・チェッカー</h1>
+    <div class="desc">
+        ※音符を上下に少しドラッグすると半音階（♯）経由で動きます。<br>
+        自動採点：和声学の禁則（連続5度・8度）、導音の解決、声部連結などを厳密にチェックします。
+    </div>
+    
+    <div id="score-display">総合スコア: 0 点</div>
+
+    <div class="controls">
+        <label for="oscType">波形:</label>
+        <select id="oscType">
+            <option value="sine">サイン波</option>
+            <option value="triangle">三角波</option>
+            <option value="square">矩形波</option>
+            <option value="sawtooth">鋸歯状波</option>
+        </select>
+        <button id="btnPlayAll">▶ 全体を再生</button>
+        <button id="btnPrint">📄 PDFで保存 / 印刷</button>
+    </div>
+
+    <div class="workspace">
+        <svg id="score" width="960" height="280"></svg>
+        <div class="buttons-container" id="measure-buttons"></div>
+    </div>
+
+    <div id="breakdown-container">
+        <h2>採点内訳</h2>
+        <ul class="log-list" id="score-logs"></ul>
+    </div>
+
+    <script>
+        // --- 音声セットアップ ---
+        let audioCtx;
+        function initAudio() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        // --- 全半音階データ ---
+        const midiNotes = [
+            { midi: 55, step: -3, acc: '',  name: 'G3' }, { midi: 56, step: -3, acc: '♯', name: 'G#3' },
+            { midi: 57, step: -2, acc: '',  name: 'A3' }, { midi: 58, step: -2, acc: '♯', name: 'A#3' },
+            { midi: 59, step: -1, acc: '',  name: 'B3' }, { midi: 60, step:  0, acc: '',  name: 'C4' },
+            { midi: 61, step:  0, acc: '♯', name: 'C#4' }, { midi: 62, step:  1, acc: '',  name: 'D4' },
+            { midi: 63, step:  1, acc: '♯', name: 'D#4' }, { midi: 64, step:  2, acc: '',  name: 'E4' },
+            { midi: 65, step:  3, acc: '',  name: 'F4' }, { midi: 66, step:  3, acc: '♯', name: 'F#4' },
+            { midi: 67, step:  4, acc: '',  name: 'G4' }, { midi: 68, step:  4, acc: '♯', name: 'G#4' },
+            { midi: 69, step:  5, acc: '',  name: 'A4' }, { midi: 70, step:  5, acc: '♯', name: 'A#4' },
+            { midi: 71, step:  6, acc: '',  name: 'B4' }, { midi: 72, step:  7, acc: '',  name: 'C5' },
+            { midi: 73, step:  7, acc: '♯', name: 'C#5' }, { midi: 74, step:  8, acc: '',  name: 'D5' },
+            { midi: 75, step:  8, acc: '♯', name: 'D#5' }, { midi: 76, step:  9, acc: '',  name: 'E5' },
+            { midi: 77, step: 10, acc: '',  name: 'F5' }, { midi: 78, step: 10, acc: '♯', name: 'F#5' },
+            { midi: 79, step: 11, acc: '',  name: 'G5' }
+        ];
+
+        // --- コード判定エンジン ---
+        const PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const CHORD_DICT = {
+            '0,4,7': '', '0,3,7': 'm', '0,3,6': 'dim', '0,4,8': 'aug',
+            '0,4,7,10': '7', '0,4,7,11': 'M7', '0,3,7,10': 'm7',
+            '0,3,6,10': 'm7b5', '0,3,6,9': 'dim7', '0,5,7': 'sus4',
+            '0,2,7': 'sus2', '0,3,7,9': 'm6',
+            '0,4,7,9': '6(add13)',
+            '0,2,4,7': 'add9', '0,2,3,7': 'm(add9)',
+            '0,4,5,7': 'add11', '0,3,5,7': 'm(add11)',
+            '0,5,7,10': '7sus4'
+        };
+
+        function detectChord(midiArr) {
+            if (midiArr.length === 0) return { name: 'NC', root: -1, type: '', isDom: false };
+            let pcs = [...new Set(midiArr.map(m => m % 12))].sort((a,b)=>a-b);
+            const bass = midiArr[0] % 12;
+
+            for (let i = 0; i < pcs.length; i++) {
+                let root = pcs[i];
+                let intervals = pcs.map(p => (p - root + 12) % 12).sort((a,b)=>a-b);
+                let key = intervals.join(',');
+
+                if (CHORD_DICT[key] !== undefined) {
+                    let type = CHORD_DICT[key];
+                    let chordName = PITCH_CLASSES[root] + type;
+                    if (root !== bass) chordName += '/' + PITCH_CLASSES[bass];
+                    return { name: chordName, root: root, type: type, isDom: type === '7' || type === '7sus4' };
+                }
+            }
+            return { name: '???', root: -1, type: '', isDom: false };
+        }
+
+        // --- データ初期化 ---
+        const NUM_MEASURES = 8;
+        const MEASURE_WIDTH = 120;
+        const VOICES = 4;
+        let chords = Array.from({ length: NUM_MEASURES }, () => [5, 9, 12, 17]); // C4, E4, G4, C5
+        let detectedChordsInfo = [];
+
+        // --- 描画と採点 ---
+        const svg = document.getElementById('score');
+        const BASE_Y = 200; 
+        const DY = 10;
+        const NOTE_RADIUS = 8;
+
+        function getNoteY(step) { return BASE_Y - (step - 2) * DY; }
+
+        function drawAndEvaluate() {
+            svg.innerHTML = '';
+            const logsList = document.getElementById('score-logs');
+            logsList.innerHTML = '';
+            
+            let totalScore = 0;
+            detectedChordsInfo = [];
+
+            // ログ記録用ヘルパー関数
+            function addLog(points, message) {
+                totalScore += points;
+                const li = document.createElement('li');
+                li.className = 'log-item';
+                const sign = points > 0 ? '+' : '';
+                const colorClass = points > 0 ? 'log-plus' : 'log-minus';
+                li.innerHTML = `<span>${message}</span> <span class="${colorClass}">${sign}${points} 点</span>`;
+                logsList.appendChild(li);
+            }
+
+            // 1. 各小節ごとのコード判定とペナルティ
+            for (let i = 0; i < NUM_MEASURES; i++) {
+                // そのままの声部順（下から）のMIDIを取得
+                let voiceMidis = [
+                    midiNotes[chords[i][0]].midi,
+                    midiNotes[chords[i][1]].midi,
+                    midiNotes[chords[i][2]].midi,
+                    midiNotes[chords[i][3]].midi
+                ];
+                let sortedMidis = [...voiceMidis].sort((a,b)=>a-b); 
+                
+                // 和音内の短2度(1)・短9度(13)のチェック
+                let hasMin2orMin9 = false;
+                for (let a = 0; a < sortedMidis.length - 1; a++) {
+                    for (let b = a + 1; b < sortedMidis.length; b++) {
+                        let interval = sortedMidis[b] - sortedMidis[a];
+                        if (interval === 1 || interval === 13) hasMin2orMin9 = true;
+                    }
+                }
+                if (hasMin2orMin9) addLog(-5, `第${i+1}小節: 和音内の短2度/短9度のぶつかり`);
+
+                let chordInfo = detectChord(sortedMidis);
+                detectedChordsInfo.push(chordInfo);
+
+                if (chordInfo.name !== '???' && chordInfo.name !== 'NC') {
+                    addLog(10, `第${i+1}小節: 有効なコード (${chordInfo.name})`);
+                }
+
+                // 導音(3度)の重複チェック (7thコードの場合のみ)
+                if (chordInfo.type === '7') {
+                    const leadingTone = (chordInfo.root + 4) % 12;
+                    let ltCount = voiceMidis.filter(m => m % 12 === leadingTone).length;
+                    if (ltCount >= 2) {
+                        addLog(-5, `第${i+1}小節: 導音(3度)の重複 (${chordInfo.name})`);
+                    }
+                }
+
+                // 前の小節との比較（マンネリ化 / ドミナント進行）
+                if (i > 0) {
+                    let prev = detectedChordsInfo[i-1];
+                    let curr = chordInfo;
+                    
+                    if (prev.name === curr.name && prev.name !== '???') {
+                        addLog(-5, `第${i+1}小節: 前の小節と同じコードの連続`);
+                    }
+                    
+                    if (prev.isDom) {
+                        let targetI = (prev.root + 5) % 12;
+                        let targetVI = (prev.root + 2) % 12;
+                        let targetIII = (prev.root + 9) % 12;
+                        if (curr.root === targetI || curr.root === targetVI || curr.root === targetIII) {
+                            addLog(15, `第${i}->${i+1}小節: ドミナント・モーション成立`);
+                        }
+                    }
+                }
+            }
+
+            // 2. 声部進行（ボイスリーディング）のチェック
+            for (let i = 0; i < NUM_MEASURES - 1; i++) {
+                let perfectCount = 0, badCount = 0;
+                
+                // --- 導音・7度の適切な解決チェック ---
+                let prevChord = detectedChordsInfo[i];
+                if (prevChord.type === '7') {
+                    const leadingTone = (prevChord.root + 4) % 12;
+                    const seventhTone = (prevChord.root + 10) % 12;
+                    
+                    for (let v = 0; v < VOICES; v++) {
+                        let prevMidi = midiNotes[chords[i][v]].midi;
+                        let currMidi = midiNotes[chords[i+1][v]].midi;
+                        
+                        // 導音が半音上（+1）へ解決
+                        if (prevMidi % 12 === leadingTone && (currMidi - prevMidi) === 1) {
+                            addLog(5, `第${i}->${i+1}小節: 導音の美しい解決 (声部${v+1})`);
+                        }
+                        // 7度が下（-1 or -2）へ解決
+                        if (prevMidi % 12 === seventhTone && (prevMidi - currMidi) >= 1 && (prevMidi - currMidi) <= 2) {
+                            addLog(5, `第${i}->${i+1}小節: 7度音の美しい解決 (声部${v+1})`);
+                        }
+                    }
+                }
+
+                // --- 禁則：連続5度・連続8度チェック ---
+                for (let v1 = 0; v1 < VOICES - 1; v1++) {
+                    for (let v2 = v1 + 1; v2 < VOICES; v2++) {
+                        let prevM1 = midiNotes[chords[i][v1]].midi;
+                        let prevM2 = midiNotes[chords[i][v2]].midi;
+                        let currM1 = midiNotes[chords[i+1][v1]].midi;
+                        let currM2 = midiNotes[chords[i+1][v2]].midi;
+                        
+                        let diff1 = currM1 - prevM1;
+                        let diff2 = currM2 - prevM2;
+                        
+                        // 両方の声部が動いており、同じ方向（平行）に進んでいる場合
+                        if (diff1 !== 0 && diff2 !== 0 && Math.sign(diff1) === Math.sign(diff2)) {
+                            let prevInterval = Math.abs(prevM2 - prevM1) % 12;
+                            let currInterval = Math.abs(currM2 - currM1) % 12;
+                            
+                            if (prevInterval === 7 && currInterval === 7) {
+                                addLog(-10, `第${i}->${i+1}小節: [禁則] 連続5度 (声部${v1+1}と${v2+1})`);
+                            }
+                            if (prevInterval === 0 && currInterval === 0) {
+                                addLog(-10, `第${i}->${i+1}小節: [禁則] 連続8度 (声部${v1+1}と${v2+1})`);
+                            }
+                        }
+                    }
+                }
+
+                // --- 共通音と跳躍のチェック ---
+                for (let v = 0; v < VOICES; v++) {
+                    let diff = Math.abs(midiNotes[chords[i][v]].midi - midiNotes[chords[i+1][v]].midi);
+                    if (diff === 0) perfectCount++;
+                    if (diff > 2) badCount++;
+                }
+                
+                if (perfectCount === 0) addLog(-3, `第${i}->${i+1}小節: 共通音が1つもない (全声部移動)`);
+                if (badCount > 0) addLog(-3 * badCount, `第${i}->${i+1}小節: 短3度以上の跳躍 (${badCount}箇所)`);
+            }
+
+            // 3. クロマチック判定（3音以上でボーナス）
+            let chromaticRuns = []; 
+            for (let v = 0; v < VOICES; v++) {
+                let run = { type: null, measures: [] }; 
+                for (let m = 0; m < NUM_MEASURES - 1; m++) {
+                    const midi1 = midiNotes[chords[m][v]].midi;
+                    const midi2 = midiNotes[chords[m+1][v]].midi;
+                    const diff = midi2 - midi1;
+
+                    if (diff === 1) { 
+                        if (run.type === 'up') run.measures.push(m + 1);
+                        else {
+                            if (run.measures.length >= 3) chromaticRuns.push({...run});
+                            run = { voice: v, type: 'up', measures: [m, m + 1] };
+                        }
+                    } else if (diff === -1) { 
+                        if (run.type === 'down') run.measures.push(m + 1);
+                        else {
+                            if (run.measures.length >= 3) chromaticRuns.push({...run});
+                            run = { voice: v, type: 'down', measures: [m, m + 1] };
+                        }
+                    } else { 
+                        if (run.measures.length >= 3) chromaticRuns.push({...run});
+                        run = { type: null, measures: [] };
+                    }
+                }
+                if (run.measures.length >= 3) chromaticRuns.push({...run});
+            }
+
+            const noteColorMap = Array.from({ length: NUM_MEASURES }, () => Array(VOICES).fill(null));
+            chromaticRuns.forEach(run => {
+                let pts = (run.measures.length - 2) * 5;
+                addLog(pts, `半音階の滑らかな進行ボーナス (声部${run.voice+1})`);
+                run.measures.forEach(m => noteColorMap[m][run.voice] = run.type === 'up' ? 'note-up' : 'note-down');
+            });
+
+            // スコア表示の更新
+            document.getElementById('score-display').innerText = `総合スコア: ${totalScore} 点`;
+
+            // --- SVG描画処理 ---
+            
+            // 五線譜と小節線
+            for (let i = 0; i < NUM_MEASURES; i++) {
+                const startX = i * MEASURE_WIDTH;
+                const endX = startX + MEASURE_WIDTH;
+                
+                const chordText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                chordText.setAttribute('x', startX + MEASURE_WIDTH / 2);
+                chordText.setAttribute('y', 35);
+                chordText.setAttribute('class', 'chord-name');
+                chordText.textContent = detectedChordsInfo[i].name;
+                svg.appendChild(chordText);
+
+                for (let line = 0; line < 5; line++) {
+                    const y = BASE_Y - line * 20;
+                    const lineEl = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    lineEl.setAttribute('x1', startX); lineEl.setAttribute('y1', y);
+                    lineEl.setAttribute('x2', endX); lineEl.setAttribute('y2', y);
+                    lineEl.setAttribute('class', 'staff-line');
+                    svg.appendChild(lineEl);
+                }
+                const barLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                barLine.setAttribute('x1', endX); barLine.setAttribute('y1', BASE_Y - 80);
+                barLine.setAttribute('x2', endX); barLine.setAttribute('y2', BASE_Y);
+                barLine.setAttribute('class', 'measure-line');
+                svg.appendChild(barLine);
+            }
+
+            // 接続線と声部連結の〇×判定
+            for (let i = 0; i < NUM_MEASURES - 1; i++) {
+                const cx1 = i * MEASURE_WIDTH + MEASURE_WIDTH / 2;
+                const cx2 = (i + 1) * MEASURE_WIDTH + MEASURE_WIDTH / 2;
+                
+                for (let v = 0; v < VOICES; v++) {
+                    const note1 = midiNotes[chords[i][v]];
+                    const note2 = midiNotes[chords[i+1][v]];
+                    const cy1 = getNoteY(note1.step);
+                    const cy2 = getNoteY(note2.step);
+                    
+                    const lineEl = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    lineEl.setAttribute('x1', cx1); lineEl.setAttribute('y1', cy1);
+                    lineEl.setAttribute('x2', cx2); lineEl.setAttribute('y2', cy2);
+                    lineEl.setAttribute('class', 'conn-line');
+                    svg.appendChild(lineEl);
+                    
+                    const diff = Math.abs(note1.midi - note2.midi);
+                    let mark = '', markClass = '';
+                    if (diff === 0) { mark = '◎'; markClass = 'mark-perfect'; }
+                    else if (diff <= 2) { mark = '〇'; markClass = 'mark-good'; }
+                    else { mark = '×'; markClass = 'mark-bad'; }
+                    
+                    const midX = (cx1 + cx2) / 2;
+                    const midY = (cy1 + cy2) / 2;
+                    
+                    const bgEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    bgEl.setAttribute('cx', midX); bgEl.setAttribute('cy', midY);
+                    bgEl.setAttribute('r', 8); bgEl.setAttribute('class', 'eval-bg');
+                    svg.appendChild(bgEl);
+
+                    const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    textEl.setAttribute('x', midX); textEl.setAttribute('y', midY + 1);
+                    textEl.setAttribute('class', `eval-text ${markClass}`);
+                    textEl.textContent = mark;
+                    svg.appendChild(textEl);
+                }
+            }
+
+            // 音符の描画
+            for (let i = 0; i < NUM_MEASURES; i++) {
+                const cx = i * MEASURE_WIDTH + MEASURE_WIDTH / 2;
+                for (let v = 0; v < VOICES; v++) {
+                    const noteDef = midiNotes[chords[i][v]];
+                    const cy = getNoteY(noteDef.step);
+                    
+                    for (let ls = 0; ls >= noteDef.step; ls -= 2) {
+                        if (ls <= 0) { 
+                            const lY = getNoteY(ls);
+                            const ledger = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                            ledger.setAttribute('x1', cx - 14); ledger.setAttribute('y1', lY);
+                            ledger.setAttribute('x2', cx + 14); ledger.setAttribute('y2', lY);
+                            ledger.setAttribute('class', 'ledger-line');
+                            svg.appendChild(ledger);
+                        }
+                    }
+                    
+                    if (noteDef.acc) {
+                        const accEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                        accEl.setAttribute('x', cx - 18); accEl.setAttribute('y', cy + 5);
+                        accEl.setAttribute('class', 'accidental');
+                        accEl.textContent = noteDef.acc;
+                        svg.appendChild(accEl);
+                    }
+                    
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', cx); circle.setAttribute('cy', cy);
+                    circle.setAttribute('r', NOTE_RADIUS);
+                    
+                    const colorClass = noteColorMap[i][v];
+                    if (colorClass) circle.classList.add('note', colorClass);
+                    else circle.classList.add('note');
+
+                    circle.setAttribute('data-m', i);
+                    circle.setAttribute('data-v', v);
+                    svg.appendChild(circle);
+                }
+            }
+        }
+
+        // --- インタラクション ---
+        let draggingNote = null, dragStartY = 0, dragStartIndex = 0;
+
+        function getMousePosition(evt) {
+            const pt = svg.createSVGPoint();
+            pt.x = evt.clientX; pt.y = evt.clientY;
+            return pt.matrixTransform(svg.getScreenCTM().inverse());
+        }
+
+        svg.addEventListener('pointerdown', (e) => {
+            if (e.target.classList.contains('note')) {
+                const m = parseInt(e.target.getAttribute('data-m'));
+                const v = parseInt(e.target.getAttribute('data-v'));
+                draggingNote = { m, v };
+                dragStartY = getMousePosition(e).y;
+                dragStartIndex = chords[m][v];
+            }
+        });
+
+        window.addEventListener('pointermove', (e) => {
+            if (draggingNote) {
+                const pos = getMousePosition(e);
+                let indexShift = Math.round((dragStartY - pos.y) / 6);
+                let newIndex = Math.max(0, Math.min(midiNotes.length - 1, dragStartIndex + indexShift));
+                chords[draggingNote.m][draggingNote.v] = newIndex;
+                drawAndEvaluate();
+            }
+        });
+
+        window.addEventListener('pointerup', () => { draggingNote = null; });
+
+        // --- 音声再生と印刷ボタン ---
+        function playChordList(noteIndices, startTime, duration) {
+            const oscType = document.getElementById('oscType').value;
+            noteIndices.forEach(idx => {
+                const midi = midiNotes[idx].midi;
+                const freq = 440 * Math.pow(2, (midi - 69) / 12);
+                const osc = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                osc.type = oscType; osc.frequency.value = freq;
+                gainNode.gain.setValueAtTime(0, startTime);
+                gainNode.gain.linearRampToValueAtTime(0.2, startTime + 0.05);
+                gainNode.gain.setValueAtTime(0.2, startTime + duration - 0.1);
+                gainNode.gain.linearRampToValueAtTime(0, startTime + duration);
+                osc.connect(gainNode); gainNode.connect(audioCtx.destination);
+                osc.start(startTime); osc.stop(startTime + duration);
+            });
+        }
+
+        const btnContainer = document.getElementById('measure-buttons');
+        for (let i = 0; i < NUM_MEASURES; i++) {
+            const btn = document.createElement('button');
+            btn.className = 'measure-btn'; btn.textContent = `聴く`;
+            btn.onclick = () => {
+                initAudio();
+                playChordList(chords[i], audioCtx.currentTime, 1.0);
+            };
+            btnContainer.appendChild(btn);
+        }
+
+        document.getElementById('btnPlayAll').addEventListener('click', () => {
+            initAudio();
+            const now = audioCtx.currentTime;
+            const measureDuration = 1.2;
+            for (let i = 0; i < NUM_MEASURES; i++) {
+                playChordList(chords[i], now + i * measureDuration, measureDuration);
+            }
+        });
+
+        document.getElementById('btnPrint').addEventListener('click', () => {
+            window.print();
+        });
+
+        drawAndEvaluate();
+    </script>
+</body>
+</html>
